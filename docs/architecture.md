@@ -1,6 +1,8 @@
 # Architecture
 
-Luz follows a four-stage pipeline: source text is lexed, parsed, type-checked, and then evaluated.
+Luz has two execution paths: an **interpreter** for development and a **compiler** that produces native executables via LLVM.
+
+## Interpreter pipeline
 
 ```
 Source code (text)
@@ -22,6 +24,36 @@ Source code (text)
    Result
 ```
 
+## Compiler pipeline
+
+```
+Source code (text)
+      |
+   [Lexer]           luz/lexer.py
+      |
+ Token stream
+      |
+   [Parser]          luz/parser.py
+      |
+  AST (tree)
+      |
+  [HIR Lowering]     luz/hir.py
+      |
+  HIR nodes
+      |
+ [LLVMCodeGen]       luz/codegen.py
+      |
+   LLVM IR
+      |
+  [llvmlite opt]     (mem2reg, inlining, ...)
+      |
+ Object file (.o)
+      |
+   [gcc/clang]       linked with luz/runtime/
+      |
+ Native executable
+```
+
 ## Lexer (`luz/lexer.py`)
 
 Converts raw source text into a flat list of `Token` objects.
@@ -30,7 +62,7 @@ Converts raw source text into a flat list of `Token` objects.
 - Emits a `QUESTION` token for `?` to support nullable type annotations (`T?`).
 - Tracks line numbers on every token so errors can report the correct source line.
 - Resolves string escape sequences (`\n`, `\t`, `\\`, `\"`) at this stage.
-- Format strings store the raw template (e.g. `"Hello {name}"`) — expression parsing happens later in the parser.
+- Format strings store the raw template (e.g. `"Hello {name}"`) - expression parsing happens later in the parser.
 - Optionally delegates to a C implementation (`luz/c_lexer/luz_lexer.dll` / `.so`) for faster tokenisation.
 
 ## Parser (`luz/parser.py`)
@@ -40,8 +72,8 @@ Consumes the token stream and builds an **Abstract Syntax Tree (AST)** using a *
 Operator precedence is enforced through a chain of parsing functions, each calling the next higher-precedence level:
 
 ```
-logical_or → logical_and → logical_not → comp_expr
-           → arith_expr → term → power → factor
+logical_or -> logical_and -> logical_not -> comp_expr
+           -> arith_expr -> term -> power -> factor
 ```
 
 Each node type (`BinOpNode`, `IfNode`, `CallNode`, `ClassDefNode`, `StructDefNode`, etc.) is a plain Python class defined at the top of the file. Nodes hold references to their child nodes, forming a tree.
@@ -56,14 +88,68 @@ Walks the AST before execution and collects type errors without running any code
 
 Key responsibilities:
 
-- **Typed variable declarations** — checks that the assigned value matches the declared type annotation.
-- **Function call arity** — checks that the number of arguments (positional + keyword) falls within the allowed range, accounting for default parameters.
-- **Function return type** — checks that `return` expressions match the declared `-> type` annotation.
-- **Class attribute inference** — scans the `init` body to build a map of `self.<attr>` types, enabling attribute access checks on typed instances.
-- **Unused variable / import / parameter detection** — reports identifiers that are declared but never read (Go-style).
-- **Type inference** — propagates types through arithmetic (`int + float → float`), function calls, and binary operations.
+- **Typed variable declarations** - checks that the assigned value matches the declared type annotation.
+- **Function call arity** - checks that the number of arguments (positional + keyword) falls within the allowed range, accounting for default parameters.
+- **Function return type** - checks that `return` expressions match the declared `-> type` annotation.
+- **Class attribute inference** - scans the `init` body to build a map of `self.<attr>` types, enabling attribute access checks on typed instances.
+- **Unused variable / import / parameter detection** - reports identifiers that are declared but never read (Go-style).
+- **Type inference** - propagates types through arithmetic (`int + float -> float`), function calls, and binary operations.
 
 The `T` class defines type constants (`T.INT`, `T.STRING`, etc.) and a `T.compatible(declared, actual)` predicate that handles nullable types, generic collections, and fixed-size numeric widening.
+
+## HIR Lowering (`luz/hir.py`)
+
+The **High-level Intermediate Representation** sits between the AST and LLVM IR. It has two jobs:
+
+1. Make every type explicit - every node carries a `type` annotation.
+2. Desugar complex constructs into a minimal set of primitives that map directly to LLVM IR patterns.
+
+Desugaring performed by `Lowering`:
+
+| Source construct | HIR equivalent |
+|---|---|
+| `for i = s to e step k` | `HirWhile` with explicit counter |
+| `for x in list` | index-based `HirWhile` |
+| `switch/case` | `HirIf`/`elif`/`else` chain |
+| `match expr { }` | chain of equality checks |
+| `x ?? y` | `if x != null { x } else { y }` |
+| `a if cond else b` | `if cond { a } else { b }` |
+| `$"hello {x}"` | series of `+` concatenations via `to_str()` |
+| `obj.method(args)` | top-level runtime function call |
+| list comprehension | `HirWhile` building a list |
+
+## LLVM Code Generator (`luz/codegen.py`)
+
+`LLVMCodeGen` lowers HIR nodes to LLVM IR via **llvmlite**.
+
+**Value representation.** All Luz values are represented as a single LLVM struct type:
+
+```
+luz_value_t  =  { i32 tag, i32 pad, i64 data }   (16 bytes)
+```
+
+The `tag` field identifies the runtime type (`0` = null, `1` = bool, `2` = int, `3` = float, `4` = string, `5` = list, `6` = dict, `7` = object). The `data` field holds an integer, a float (bitcast), or a pointer (via `ptrtoint`).
+
+**Code generation targets:**
+
+| HIR node | LLVM output |
+|---|---|
+| `HirLiteral` | constant struct or `luz_rt_str_literal` call |
+| `HirLet` / `HirAssign` | `alloca` + `store` |
+| `HirLoad` | `load` |
+| `HirBinOp` | call to `luz_rt_<op>` dispatch helper |
+| `HirUnaryOp` | call to `luz_rt_neg` / `luz_rt_not` |
+| `HirIf` | `cbranch` + `if.then` / `if.else` / `if.merge` basic blocks |
+| `HirWhile` | `while.cond` / `while.body` / `while.exit` basic blocks |
+| `HirReturn` | `ret` |
+| `HirFuncDef` | top-level LLVM function |
+| `HirCall` | `call` to runtime builtin or user function |
+| `HirList` / `HirDict` | `luz_rt_make_list` / `luz_rt_make_dict` + appends |
+| `HirFieldLoad/Store` | `luz_rt_getfield` / `luz_rt_setfield` |
+| `HirIndex/IndexStore` | `luz_rt_getindex` / `luz_rt_setindex` |
+| `HirClassDef` | one LLVM function per method, named `ClassName__method` |
+
+**Optimisation.** After IR generation, `compile_to_object()` runs the llvmlite pass manager at `opt=2` (equivalent to `gcc -O2`).
 
 ## Interpreter (`luz/interpreter.py`)
 
@@ -89,6 +175,19 @@ Method calls automatically inject `self` and `super` into the method's local sco
 
 **Type enforcement** at runtime: typed variable assignments call `_check_type()`, which handles generic collections, nullable types, fixed-size numeric bounds (`_enforce_type()`), and class hierarchy walking. A `_TYPE_PARSE_CACHE` class-level dict avoids re-parsing generic type strings on repeated assignments.
 
+## C Runtime (`luz/runtime/`)
+
+The native runtime provides the heap-allocated data structures used by compiled programs.
+
+| File | Contents |
+|---|---|
+| `luz_runtime.h/.c` | `luz_value_t`, strings (with SSO), lists, dicts, objects, ARC, exceptions, I/O builtins |
+| `luz_rt_ops.h/.c` | Dynamic dispatch helpers: arithmetic, comparison, logical, membership, collection access, slicing |
+
+Memory is managed with **ARC (Automatic Reference Counting)**. Every heap object starts with `refcount = 1`; `luz_*_retain` / `luz_*_release` increment / decrement it.
+
+Strings use a **Small String Optimisation (SSO)**: strings up to 23 bytes are stored inline in the struct with no heap allocation.
+
 ## Error system (`luz/exceptions.py`)
 
 All errors inherit from `LuzError`:
@@ -96,11 +195,11 @@ All errors inherit from `LuzError`:
 ```
 LuzError
 ├── SyntaxFault           (lexer / parser errors)
-├── SemanticFault         (type errors, undefined variables, wrong argument count…)
+├── SemanticFault         (type errors, undefined variables, wrong argument count...)
 │   ├── TypeViolationFault
 │   ├── AttributeNotFoundFault
 │   └── ArityFault
-├── RuntimeFault          (division by zero, index out of bounds…)
+├── RuntimeFault          (division by zero, index out of bounds...)
 ├── CastFault             (failed type conversion)
 └── UserFault             (raised by the alert keyword)
 ```
@@ -114,21 +213,25 @@ luz-lang/
 ├── main.py               # Entry point: REPL, file execution, --check mode
 ├── luz/
 │   ├── tokens.py         # TokenType enum and Token class
-│   ├── lexer.py          # Lexer: text → tokens
-│   ├── parser.py         # Parser: tokens → AST + all AST node classes
-│   ├── typechecker.py    # Static type checker: AST → list[TypeCheckError]
+│   ├── lexer.py          # Lexer: text -> tokens
+│   ├── parser.py         # Parser: tokens -> AST + all AST node classes
+│   ├── typechecker.py    # Static type checker: AST -> list[TypeCheckError]
+│   ├── hir.py            # HIR nodes + Lowering pass (AST -> HIR)
+│   ├── codegen.py        # LLVM IR code generator (HIR -> native code)
 │   ├── interpreter.py    # Interpreter: executes the AST
 │   ├── exceptions.py     # Full error class hierarchy
-│   └── c_lexer/          # Optional C lexer (faster tokenisation on Windows/Linux)
-│       ├── luz_lexer.c
-│       ├── bridge.py     # ctypes bridge
+│   ├── c_lexer/          # Optional C lexer (faster tokenisation)
+│   │   ├── luz_lexer.c
+│   │   ├── bridge.py
+│   │   └── Makefile
+│   └── runtime/          # Native C runtime for compiled programs
+│       ├── luz_runtime.h/.c
+│       ├── luz_rt_ops.h/.c
 │       └── Makefile
-├── libs/                 # Standard library (luz-math, luz-random, luz-io, …)
+├── libs/                 # Standard library (luz-math, luz-random, luz-io, ...)
 ├── tests/
 │   ├── test_suite.py     # pytest test suite
 │   └── fuzzer.py         # Random-input fuzzer
-├── docs/                 # This documentation (MkDocs)
 ├── installer/            # Windows Inno Setup installer script
-├── vscode-luz/           # VS Code language extension
-└── examples/             # 28 example programs
+└── examples/             # Example programs
 ```
