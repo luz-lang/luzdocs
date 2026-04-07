@@ -100,4 +100,3 @@ nav:
       - luz-types: stdlib/types.md
   - Ray Package Manager: ray.md
   - Architecture: architecture.md
-  - Versioning: versioning.md
