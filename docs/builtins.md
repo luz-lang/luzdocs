@@ -1,17 +1,20 @@
 # Built-in Functions
 
+> **Interpreter vs compiler:** All builtins listed here work in the interpreter (`luz.exe`). Builtins that are also available in the native compiler (`luzc`) are marked with **[luzc]**.
+
 ## I/O
 
-| Function | Description |
-|---|---|
-| `write(...)` | Print one or more values to stdout, separated by spaces |
-| `listen(prompt?)` | Print `prompt` and read a line from stdin. Automatically converts to `int` or `float` if the input is numeric; returns a `string` otherwise |
+| Function | Compiler | Description |
+|---|---|---|
+| `write(...)` | **[luzc]** | Print one or more values to stdout, separated by spaces |
+| `listen(prompt?)` | **[luzc]** | Print `prompt` and read a line from stdin. In the interpreter, automatically converts to `int` or `float` if the input is numeric; returns a `string` otherwise. In `luzc`, always returns a `string` — use `to_int()` / `to_float()` to convert. |
 
 ```
 write("hello")              # hello
 write(1, 2, 3)              # 1 2 3
 name = listen("Name: ")     # returns string
-age  = listen("Age: ")      # returns int if user types a number
+age  = listen("Age: ")      # interpreter: returns int if user types a number
+                            # luzc: returns string — use to_int(listen("Age: "))
 ```
 
 ---
@@ -27,15 +30,15 @@ age  = listen("Age: ")      # returns int if user types a number
 
 ## Type casting
 
-| Function | Description |
-|---|---|
-| `to_int(v)` | Convert to integer (truncates floats, parses strings) |
-| `to_float(v)` | Convert to float |
-| `to_str(v)` | Convert to string |
-| `to_bool(v)` | Convert to boolean |
-| `to_num(v)` | Convert string to int or float (auto-detects) |
+| Function | Compiler | Description |
+|---|---|---|
+| `to_int(v)` | **[luzc]** | Convert to integer (truncates floats, parses strings) |
+| `to_float(v)` | **[luzc]** | Convert to float |
+| `to_str(v)` | **[luzc]** | Convert to string |
+| `to_bool(v)` | **[luzc]** | Convert to boolean |
+| `to_num(v)` | — | Convert string to int or float (auto-detects); interpreter only |
 
-Raises `CastFault` if the conversion is not possible.
+Raises `CastFault` (interpreter) or a runtime error (luzc) if the conversion is not possible.
 
 ```
 to_int(3.9)      # 3

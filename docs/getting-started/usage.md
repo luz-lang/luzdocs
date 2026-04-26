@@ -62,10 +62,60 @@ Runs every `.luz` file in `examples/`, prints a pass/fail/interactive status for
 
 ## Using the standalone installer (Windows)
 
-Download and run the installer from the [download page](https://elabsurdo984.github.io/luz-lang/download/). After installation `luz` is available from any terminal:
+Download and run the installer from the [download page](https://elabsurdo984.github.io/luz-lang/download/). After installation `luz`, `luzc`, and `ray` are available from any terminal:
 
 ```bash
-luz program.luz    # run a file
+luz program.luz    # run a file (interpreter)
 luz                # open the REPL
+luzc program.luz   # compile to a native executable
 ray install user/repo   # install a package
 ```
+
+---
+
+## Native compiler (`luzc`)
+
+`luzc` compiles Luz source files to native Windows executables using the bundled TCC backend. No clang or LLVM installation is required.
+
+### Basic usage
+
+```bash
+luzc program.luz              # compile → program.exe
+luzc program.luz -o myapp     # compile with custom output name
+luzc program.luz --run        # compile and run immediately
+```
+
+### Inspect intermediate output
+
+```bash
+luzc program.luz --emit-c          # print generated C source to stdout
+luzc program.luz --emit-c -o out.c # save generated C source to a file
+luzc program.luz --emit-llvm       # emit LLVM IR (legacy, deprecated)
+```
+
+### Debugging and diagnostics
+
+```bash
+luzc program.luz --tokens     # print the token stream
+luzc program.luz --ast        # print the AST
+luzc program.luz --hir        # print the HIR (high-level IR)
+luzc program.luz --check      # run type checking only, print errors
+luzc program.luz --check-json # type checking errors as JSON
+```
+
+### Information flags
+
+```bash
+luzc --version
+luzc --help
+```
+
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `LUZ_HOME` | Set by the installer; points to the install directory where TCC and the runtime live |
+| `LUZ_TCC` | Override the path to the `tcc` binary |
+| `LUZ_RT` | Override the path to the `luz_rt.c` runtime file |
+
+> **Note:** The interpreter (`luz.exe`) and the compiler (`luzc.exe`) share the same language syntax for most constructs, but `luzc` requires typed function signatures and uses `alert("message")` as a function call rather than a keyword. See the language reference for details.

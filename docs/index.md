@@ -1,6 +1,6 @@
 <div class="luz-hero">
   <h1>Luz Language</h1>
-  <p>A lightweight, interpreted programming language designed to be simple, readable, and easy to learn.</p>
+  <p>A lightweight programming language designed to be simple, readable, and easy to learn — now with a native compiler that produces Windows executables with zero external dependencies.</p>
   <div class="luz-hero-btns">
     <a id="download-btn" href="https://github.com/Elabsurdo984/luz-lang/releases/latest" class="luz-btn-primary">Download</a>
     <a href="getting-started/installation/" class="luz-btn-secondary">Get Started →</a>
@@ -50,6 +50,11 @@ for i = 1 to 5 {
 ## Why Luz?
 
 <div class="luz-features">
+  <div class="luz-card">
+    <div class="luz-card-icon">🚀</div>
+    <h3>Native compiler (2.0beta)</h3>
+    <p>Compile to native Windows executables with <code>luzc</code>. TCC is bundled — no clang, no LLVM needed.</p>
+  </div>
   <div class="luz-card">
     <div class="luz-card-icon">⚡</div>
     <h3>No boilerplate</h3>

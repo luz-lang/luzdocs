@@ -2,14 +2,18 @@
 
 ## Windows (standalone installer)
 
-Download the installer from the [download page](https://elabsurdo984.github.io/luz-lang/download/). It bundles `luz.exe`, `ray.exe`, the standard libraries, and optionally example programs. No Python required.
+Download the installer from the [download page](https://elabsurdo984.github.io/luz-lang/download/). It bundles `luz.exe`, `luzc.exe`, `ray.exe`, the standard libraries, TCC (the bundled C compiler used by `luzc`), and optionally example programs. No Python required, no clang, no LLVM needed.
 
-After installation, `luz` and `ray` are available from any terminal:
+After installation, `luz`, `luzc`, and `ray` are available from any terminal:
 
 ```bash
-luz program.luz   # run a file
-luz               # open the REPL
+luz program.luz        # run a file (interpreter)
+luz                    # open the REPL
+luzc program.luz       # compile to a native executable
+luzc program.luz --run # compile and run immediately
 ```
+
+The installer also sets the `LUZ_HOME` environment variable, which `luzc` uses to locate the bundled TCC compiler and the Luz C runtime automatically.
 
 ## From source
 
@@ -35,11 +39,11 @@ Features: syntax highlighting, autocompletion, inline error detection, hover doc
 
 ## Optional: build the C lexer
 
-For faster tokenisation, compile the C lexer (requires MSYS2 on Windows):
+For faster tokenisation in the interpreter, compile the C lexer (requires MSYS2 on Windows):
 
 ```bash
 cd luz/c_lexer
 make
 ```
 
-The interpreter automatically uses `luz_lexer.dll` (Windows) or `luz_lexer.so` (Linux/macOS) if it is present.
+The interpreter automatically uses `luz_lexer.dll` (Windows) or `luz_lexer.so` (Linux/macOS) if it is present. This is not needed for `luzc`, which has its own built-in lexer.

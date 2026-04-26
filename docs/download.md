@@ -67,10 +67,14 @@ fetch(API)
 ### Windows — What's included
 
 - Full Luz interpreter (`luz.exe`)
+- Native compiler (`luzc.exe`) — compiles `.luz` files to standalone Windows executables
+- TCC (Tiny C Compiler, ~100 KB) — bundled, used by `luzc` internally
 - `ray` package manager (`ray.exe`)
-- `luz` and `ray` added to your system PATH automatically
+- `luz`, `luzc`, and `ray` added to your system PATH automatically
 - Standard libraries pre-installed (`luz-math`, `luz-random`, `luz-io`, `luz-system`)
-- No Python required
+- No Python required, no clang, no LLVM needed
+
+The installer sets the `LUZ_HOME` environment variable so `luzc` can locate TCC and the runtime automatically.
 
 ### Linux — Setup after download
 
@@ -83,8 +87,10 @@ luz program.luz
 ### After installing
 
 ```bash
-luz program.luz        # run a file
+luz program.luz        # run a file (interpreter)
 luz                    # open the interactive REPL
+luzc program.luz       # compile to native executable
+luzc program.luz --run # compile and run immediately
 ray install user/pkg   # install a package
 ```
 

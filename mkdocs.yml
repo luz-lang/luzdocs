@@ -1,5 +1,5 @@
 site_name: Luz Language
-site_description: Luz is an open-source interpreted programming language written in Python. Clean syntax, OOP, closures, pattern matching, error handling, and a built-in package manager.
+site_description: Luz is an open-source programming language with a native compiler (luzc) that produces zero-dependency Windows executables, plus an interpreter for fast development. Clean syntax, OOP, closures, pattern matching, error handling, and a built-in package manager.
 site_url: https://luz-lang.github.io/luzdocs/
 repo_url: https://github.com/luz-lang/luzlang
 repo_name: luz-lang/luzlang

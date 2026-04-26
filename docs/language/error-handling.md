@@ -16,7 +16,9 @@ The variable in `rescue (error)` holds the error message as a string.
 
 ## alert
 
-Raise a custom error with the `alert` keyword:
+Raise a custom error with `alert`. The syntax differs slightly between the interpreter and the compiler:
+
+**Interpreter (`luz.exe`)** — `alert` is a keyword followed by an expression:
 
 ```
 function divide(a, b) {
@@ -25,7 +27,22 @@ function divide(a, b) {
     }
     return a / b
 }
+```
 
+**Compiler (`luzc`)** — `alert` is called as a function:
+
+```
+function divide(a: int, b: int) -> int {
+    if b == 0 {
+        alert("Cannot divide by zero")
+    }
+    return a / b
+}
+```
+
+Both forms can be caught with `attempt / rescue`:
+
+```
 attempt {
     result = divide(5, 0)
 } rescue (e) {
@@ -33,11 +50,11 @@ attempt {
 }
 ```
 
-`alert` accepts any expression:
+`alert` accepts any string expression:
 
 ```
-alert "Something went wrong"
-alert $"Value {x} is out of range"
+alert "Something went wrong"           # interpreter
+alert($"Value {x} is out of range")    # compiler
 ```
 
 ## Error types

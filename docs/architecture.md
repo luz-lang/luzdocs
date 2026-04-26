@@ -1,6 +1,6 @@
 # Architecture
 
-Luz has two execution paths: an **interpreter** for development and a **compiler** that produces native executables via LLVM.
+Luz has two execution paths: an **interpreter** (`luz.exe`) for development and a **native compiler** (`luzc`) that produces standalone executables via TCC (Tiny C Compiler).
 
 ## Interpreter pipeline
 
@@ -24,35 +24,36 @@ Source code (text)
    Result
 ```
 
-## Compiler pipeline
+## Compiler pipeline (2.0beta)
 
 ```
 Source code (text)
       |
-   [Lexer]           luz/lexer.py
+   [Lexer]           compiler/src/
       |
  Token stream
       |
-   [Parser]          luz/parser.py
+   [Parser]          compiler/src/
       |
   AST (tree)
       |
-  [HIR Lowering]     luz/hir.py
+  [HIR Lowering]     compiler/src/
       |
   HIR nodes
       |
- [LLVMCodeGen]       luz/codegen.py
+ [C Code Generator]  compiler/src/ccodegen.cpp
       |
-   LLVM IR
+   C source code
       |
-  [llvmlite opt]     (mem2reg, inlining, ...)
+   [TCC]             bundled (~100 KB), no external install
+      linked with compiler/runtime/luz_rt.c
       |
- Object file (.o)
-      |
-   [gcc/clang]       linked with luz/runtime/
-      |
- Native executable
+ Native executable (.exe)
 ```
+
+TCC (Tiny C Compiler) is bundled with the installer. Users need no external compiler toolchain — no clang, no LLVM, no MSVC. The `LUZ_HOME` environment variable (set by the installer) tells `luzc` where to find TCC and the runtime.
+
+> **Legacy:** The previous LLVM-based pipeline (`--emit-llvm`) is still accessible but deprecated. Use `--emit-c` for the current backend.
 
 ## Lexer (`luz/lexer.py`)
 
@@ -118,38 +119,40 @@ Desugaring performed by `Lowering`:
 | `obj.method(args)` | top-level runtime function call |
 | list comprehension | `HirWhile` building a list |
 
-## LLVM Code Generator (`luz/codegen.py`)
+## C Code Generator (`compiler/src/ccodegen.cpp`)
 
-`LLVMCodeGen` lowers HIR nodes to LLVM IR via **llvmlite**.
+`CCodeGen` lowers HIR nodes to C source code, which is then compiled by the bundled TCC.
 
-**Value representation.** All Luz values are represented as a single LLVM struct type:
+**Value representation.** All Luz values are represented as a tagged union in C:
 
-```
+```c
 luz_value_t  =  { i32 tag, i32 pad, i64 data }   (16 bytes)
 ```
 
-The `tag` field identifies the runtime type (`0` = null, `1` = bool, `2` = int, `3` = float, `4` = string, `5` = list, `6` = dict, `7` = object). The `data` field holds an integer, a float (bitcast), or a pointer (via `ptrtoint`).
+The `tag` field identifies the runtime type (`0` = null, `1` = bool, `2` = int, `3` = float, `4` = string, `5` = list, `6` = dict, `7` = object). The `data` field holds an integer, a float (bitcast), or a pointer.
 
 **Code generation targets:**
 
-| HIR node | LLVM output |
+| HIR node | C output |
 |---|---|
-| `HirLiteral` | constant struct or `luz_rt_str_literal` call |
-| `HirLet` / `HirAssign` | `alloca` + `store` |
-| `HirLoad` | `load` |
+| `HirLiteral` | C literal or `luz_rt_str_literal` call |
+| `HirLet` / `HirAssign` | local variable declaration / assignment |
+| `HirLoad` | variable reference |
 | `HirBinOp` | call to `luz_rt_<op>` dispatch helper |
 | `HirUnaryOp` | call to `luz_rt_neg` / `luz_rt_not` |
-| `HirIf` | `cbranch` + `if.then` / `if.else` / `if.merge` basic blocks |
-| `HirWhile` | `while.cond` / `while.body` / `while.exit` basic blocks |
-| `HirReturn` | `ret` |
-| `HirFuncDef` | top-level LLVM function |
-| `HirCall` | `call` to runtime builtin or user function |
+| `HirIf` | C `if` / `else` blocks |
+| `HirWhile` | C `while` loop |
+| `HirReturn` | C `return` |
+| `HirFuncDef` | C function |
+| `HirCall` | C function call to runtime builtin or user function |
 | `HirList` / `HirDict` | `luz_rt_make_list` / `luz_rt_make_dict` + appends |
 | `HirFieldLoad/Store` | `luz_rt_getfield` / `luz_rt_setfield` |
 | `HirIndex/IndexStore` | `luz_rt_getindex` / `luz_rt_setindex` |
-| `HirClassDef` | one LLVM function per method, named `ClassName__method` |
+| `HirClassDef` | one C function per method, named `ClassName__method` |
 
-**Optimisation.** After IR generation, `compile_to_object()` runs the llvmlite pass manager at `opt=2` (equivalent to `gcc -O2`).
+## Legacy: LLVM Code Generator
+
+The previous LLVM-based backend (`--emit-llvm`) is still present but deprecated. It required `llvmlite` and an external linker (clang/gcc). The C backend is the default as of 2.0beta.
 
 ## Interpreter (`luz/interpreter.py`)
 
@@ -175,14 +178,13 @@ Method calls automatically inject `self` and `super` into the method's local sco
 
 **Type enforcement** at runtime: typed variable assignments call `_check_type()`, which handles generic collections, nullable types, fixed-size numeric bounds (`_enforce_type()`), and class hierarchy walking. A `_TYPE_PARSE_CACHE` class-level dict avoids re-parsing generic type strings on repeated assignments.
 
-## C Runtime (`luz/runtime/`)
+## C Runtime (`compiler/runtime/luz_rt.c`)
 
-The native runtime provides the heap-allocated data structures used by compiled programs.
+The native runtime provides the heap-allocated data structures used by compiled programs. It is a single C file linked by TCC during compilation.
 
 | File | Contents |
 |---|---|
-| `luz_runtime.h/.c` | `luz_value_t`, strings (with SSO), lists, dicts, objects, ARC, exceptions, I/O builtins |
-| `luz_rt_ops.h/.c` | Dynamic dispatch helpers: arithmetic, comparison, logical, membership, collection access, slicing |
+| `luz_rt.c` | `luz_value_t`, strings (with SSO), lists, dicts, objects, ARC, exceptions, I/O builtins |
 
 Memory is managed with **ARC (Automatic Reference Counting)**. Every heap object starts with `refcount = 1`; `luz_*_retain` / `luz_*_release` increment / decrement it.
 
@@ -210,27 +212,33 @@ Every error carries a `line` attribute that is attached when the error propagate
 
 ```
 luz-lang/
-├── main.py               # Entry point: REPL, file execution, --check mode
+├── main.py               # Interpreter entry point: REPL, file execution, --check mode
 ├── luz/
 │   ├── tokens.py         # TokenType enum and Token class
 │   ├── lexer.py          # Lexer: text -> tokens
 │   ├── parser.py         # Parser: tokens -> AST + all AST node classes
 │   ├── typechecker.py    # Static type checker: AST -> list[TypeCheckError]
 │   ├── hir.py            # HIR nodes + Lowering pass (AST -> HIR)
-│   ├── codegen.py        # LLVM IR code generator (HIR -> native code)
+│   ├── codegen.py        # Legacy LLVM IR code generator (deprecated)
 │   ├── interpreter.py    # Interpreter: executes the AST
 │   ├── exceptions.py     # Full error class hierarchy
-│   ├── c_lexer/          # Optional C lexer (faster tokenisation)
-│   │   ├── luz_lexer.c
-│   │   ├── bridge.py
-│   │   └── Makefile
-│   └── runtime/          # Native C runtime for compiled programs
-│       ├── luz_runtime.h/.c
-│       ├── luz_rt_ops.h/.c
+│   └── c_lexer/          # Optional C lexer (faster tokenisation for interpreter)
+│       ├── luz_lexer.c
+│       ├── bridge.py
 │       └── Makefile
+├── compiler/             # Native compiler (luzc) — C++ source
+│   ├── src/
+│   │   ├── main.cpp      # luzc entry point, CLI flag handling
+│   │   └── ccodegen.cpp  # C code generator (HIR -> C source)
+│   ├── include/luz/
+│   │   └── ccodegen.hpp
+│   ├── runtime/
+│   │   └── luz_rt.c      # C runtime linked into every compiled program
+│   ├── tools/            # Bundled TCC and support tools
+│   └── CMakeLists.txt
 ├── libs/                 # Standard library (luz-math, luz-random, luz-io, ...)
 ├── tests/
-│   ├── test_suite.py     # pytest test suite
+│   ├── test_suite.py     # pytest test suite (interpreter)
 │   └── fuzzer.py         # Random-input fuzzer
 ├── installer/            # Windows Inno Setup installer script
 └── examples/             # Example programs
